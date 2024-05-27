@@ -1,0 +1,7 @@
+count_words.py
+sample.png
+
+.env
+venv/
+
+__pycache__/
