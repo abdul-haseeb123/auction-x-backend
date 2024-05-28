@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
 import jwt
+import httpx
 from fastapi import APIRouter, HTTPException, Depends, Response, Request, UploadFile, File, Body
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import RedirectResponse
 from typing import Annotated
 from pymongo.errors import DuplicateKeyError
-from ..schemas.users import UserCreate, User
+from ..schemas.users import UserCreate, User, GoogleUser, GoogleToken
 from ..schemas.apiresponse import ApiResponseUser, ApiResponseUsers, ApiResponseToken, Token, RefreshToken, ApiResponse, ApiResponseRefresh, TokenData
 
 from ..utils.main import upload_image, delete_image, verify_password
@@ -22,9 +23,17 @@ oauth = OAuth(config)
 CONF_URL = 'https://accounts.google.com/.well-known/openid-configuration'
 oauth.register(
     name="google",
-    server_metadata_url=CONF_URL,
-    client_kwargs={"scope": "openid email profile", "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true"},
-)
+    access_token_url="https://oauth2.googleapis.com/token",
+    access_token_params=None,
+    refresh_token_url="https://oauth2.googleapis.com/token",
+    refresh_token_params=None,
+    authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
+    authorize_params={"access_type": "offline"},
+    api_base_url="https://www.googleapis.com/oauth2/v1/",
+    client_kwargs={"scope": "openid email profile",  "prompt":"consent"},
+    jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+    include_granted_scopes=True,
+)   
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -55,6 +64,19 @@ async def generate_access_refresh_token(user: TokenData):
     logged_in_user = await users.update_refresh_token(user.username, refresh_token)
 
     return logged_in_user, access_token, refresh_token
+
+@router.post("/custom-refresh-google-token")
+async def read_root(request: Request, response: Response):
+    access_token = request.cookies.get("refresh_token")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = await users.get_google_user_by_refresh_token(access_token)
+    print('user', user)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    user_refresh_token = user["token"]["refresh_token"]
+    token = await oauth.google.fetch_access_token(grant_type="refresh_token", refresh_token=user_refresh_token)
+    return token
 
 @router.get("/", response_model=ApiResponseUsers)
 async def get_users():
@@ -139,26 +161,40 @@ async def login_with_google(request: Request):
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@router.get("/google/callback")
-async def auth_with_google(request: Request):
-    print("I am inside auth_with_google")
+@router.get("/google/callback",response_model=ApiResponseToken)
+async def auth_with_google(request: Request, response: Response):
     try:
         token = await oauth.google.authorize_access_token(request)
-        print(token)
     except OAuthError as error:
         raise HTTPException(400, detail=str(error))
+    google_token = GoogleToken(access_token=token.get("access_token"), refresh_token=token.get("refresh_token"), expires_at=datetime.fromtimestamp(token.get("expires_at")))
+
     user_info = token.get('userinfo')
     user = await users.get_user_by_email(user_info.get("email"))
-    if user:
-        request.session['user'] = dict(user)
-    return {"token": token, "user": user}
+    if not user:
+        google_user = GoogleUser(full_name=user_info.get("name"), username=user_info.get("email").split("@")[0], email=user_info.get("email"), email_verified=user_info.get("email_verified"), avatar=user_info.get("picture"), account_type="GOOGLE", token=google_token).model_dump()
+
+        user_id = await users.create_user(google_user)
+
+        google_user["_id"] = user_id
+        token_res = Token(access_token=token.get("access_token"), refresh_token=token.get("refresh_token"), user=User(**google_user))
+        response.set_cookie("access_token", token.get("access_token"), secure=True, httponly=True)
+        response.set_cookie("refresh_token", token.get("refresh_token"), secure=True, httponly=True)
+        return ApiResponseToken(status_code=200, data=token_res, message="User logged in successfully")
+    
+    await users.update_google_token(user["username"], google_token.model_dump())
+    token = Token(access_token=token.get("access_token"), refresh_token=token.get("refresh_token"), user=User(**user))
+    response.set_cookie("access_token", token.access_token, secure=True, httponly=True)
+    response.set_cookie("refresh_token", token.refresh_token, secure=True, httponly=True)
+    return ApiResponseToken(status_code=200, data=token, message="User logged in successfully")
 
 
 
 
 @router.post("/logout", response_model=ApiResponse)
 async def logout(current_user: Annotated[User, Depends(get_current_user)], response: Response, request: Request):
-    # users.find_one_and_update({"username": current_user.username}, {"$set": {"refresh_token": None}})
+    if current_user.account_type == "GOOGLE":
+        await users.update_google_token(current_user.username, None)
     await users.update_refresh_token(current_user.username, None)
     response.delete_cookie("access_token", secure=True, httponly=True)
     response.delete_cookie("refresh_token", secure=True, httponly=True)
@@ -169,6 +205,18 @@ async def refresh_token(request: Request, response: Response):
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
         raise HTTPException(401, "Refresh token not found")
+    user = await users.get_google_user_by_refresh_token(refresh_token=refresh_token)
+    if user:
+        user_refresh_token = user["token"]["refresh_token"]
+        token = await oauth.google.fetch_access_token(grant_type="refresh_token", refresh_token=user_refresh_token)
+        print("here, ", token)
+        print("token.get", token.get("access_token"))
+        print("typeof token", type(token))
+        new_token = GoogleToken(access_token=token.get("access_token"), refresh_token=user_refresh_token, expires_at=datetime.fromtimestamp(token.get("expires_at")))
+        
+        await users.update_google_token(user["username"], new_token.model_dump())
+        response.set_cookie("access_token", token.get("access_token"), secure=True, httponly=True)
+        return ApiResponseRefresh(status_code=200, data=RefreshToken(access_token=token.get("access_token"), refresh_token=refresh_token), message="Token refreshed successfully")
     try:
         decoded = jwt.decode(refresh_token, os.environ.get("REFRESH_TOKEN_SECRET"), algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
@@ -202,6 +250,8 @@ async def refresh_token(request: Request, response: Response):
             }
         },})
 async def update_password(current_user: Annotated[User, Depends(get_current_user)], current_password:Annotated[str, Body()], new_password:Annotated[str, Body()]):
+    if current_user.account_type == "GOOGLE":
+        raise HTTPException(400, "Cannot update password for Google account")
     is_correct_user = authenticate_user(current_user.username, current_password)
     if not is_correct_user:
         raise HTTPException(400, "Incorrect password")
@@ -222,7 +272,7 @@ async def update_avatar(current_user: Annotated[User, Depends(get_current_user)]
             raise HTTPException(400, detail="Avatar must be an image file")
     except AttributeError or KeyError:
         raise HTTPException(400, detail="Avatar must be an image file")
-    if current_user.avatar:
+    if current_user.avatar and not type(current_user.avatar) == str:
         try:
             await delete_image(current_user.avatar.public_id)
         except Exception as e:
@@ -239,7 +289,7 @@ async def update_cover_image(current_user: Annotated[User, Depends(get_current_u
             raise HTTPException(400, detail="Cover image must be an image file")
     except AttributeError or KeyError:
         raise HTTPException(400, detail="Cover image must be an image file")
-    if current_user.cover_image:
+    if current_user.cover_image and not type(current_user.cover_image) == str:
         try:
             await delete_image(current_user.cover_image.public_id)
         except Exception as e:
@@ -249,12 +299,12 @@ async def update_cover_image(current_user: Annotated[User, Depends(get_current_u
 
 @router.delete("/delete-account", response_model=ApiResponse)
 async def delete_account(current_user: Annotated[User, Depends(get_current_user)], response: Response):
-    if current_user.avatar:
+    if current_user.avatar and not type(current_user.avatar) == str:
         try:
             await delete_image(current_user.avatar.public_id)
         except Exception as e:
             raise HTTPException(400, detail=str(e))
-    if current_user.cover_image:
+    if current_user.cover_image and not type(current_user.cover_image) == str:
         try:
             await delete_image(current_user.cover_image.public_id)
         except Exception as e:

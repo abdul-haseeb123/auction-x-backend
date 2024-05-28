@@ -12,6 +12,11 @@ def get_users():
 
 async def create_user(user: dict):
     try:
+        if user["account_type"] == "GOOGLE":
+            return collection.insert_one(user).inserted_id
+    except KeyError:
+        pass
+    try:
         user["password"] = get_password_hash(user["password"])
     except KeyError:
         raise ValueError("password is required")
@@ -29,8 +34,19 @@ async def get_user_by_id(id: str):
     user = collection.find_one({"_id": ObjectId(id)})
     return user
 
+async def get_google_user_by_access_token(access_token: str):
+    user = collection.find_one({"token.access_token": access_token})
+    return user
+
+async def get_google_user_by_refresh_token(refresh_token: str):
+    user = collection.find_one({"token.refresh_token": refresh_token})
+    return user
+
 async def update_refresh_token(username: str, refresh_token: str | None, new=False):
     return collection.find_one_and_update({"username": username}, {"$set": {"refresh_token": refresh_token}}, return_document=ReturnDocument.AFTER if new else ReturnDocument.BEFORE)
+
+async def update_google_token(username: str, google_token: dict | None, new=False):
+    return collection.find_one_and_update({"username": username}, {"$set": {"token": google_token}}, return_document=ReturnDocument.AFTER if new else ReturnDocument.BEFORE)
 
 async def update_password(username: str, password: str, new=False):
     hashed_password = get_password_hash(password)
