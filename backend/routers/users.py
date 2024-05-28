@@ -1,10 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
 import jwt
-import httpx
 from fastapi import APIRouter, HTTPException, Depends, Response, Request, UploadFile, File, Body
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi.responses import RedirectResponse
 from typing import Annotated
 from pymongo.errors import DuplicateKeyError
 from ..schemas.users import UserCreate, User, GoogleUser, GoogleToken

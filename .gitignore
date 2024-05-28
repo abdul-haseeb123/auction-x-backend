@@ -3,5 +3,5 @@ sample.png
 
 .env
 venv/
-
+.vscode/
 __pycache__/

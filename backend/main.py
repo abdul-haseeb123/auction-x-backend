@@ -1,10 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import users
+from .routers import users, listings
 from starlette.middleware.sessions import SessionMiddleware
 
 
-app = FastAPI()
+app = FastAPI(title="AuctionX API" ,root_path="/api/v1", servers=[
+    {"url": "http://localhost:8000/api/v1", "description": "Localhost server"}
+    ]
+    )
 origins = [
     "http://localhost.tiangolo.com",
     "https://localhost.tiangolo.com",
@@ -22,6 +25,7 @@ app.add_middleware(
 )
 app.add_middleware(SessionMiddleware, secret_key="my-very-long-secret")
 app.include_router(users.router)
+app.include_router(listings.router)
 
 @app.get("/")
 def read_root():
