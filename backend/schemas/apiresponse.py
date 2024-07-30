@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field,BeforeValidator
 from typing import Any, List, Annotated
 from .users import User
-
+from .listings import ListingCreate, ListingList
 
 class TokenData(BaseModel):
     id : Annotated[str, BeforeValidator(str)] = Field(alias="_id")
@@ -36,3 +36,9 @@ class ApiResponseToken(ApiResponse):
 
 class ApiResponseRefresh(ApiResponse):
     data: RefreshToken
+
+class ApiResponseListing(ApiResponse):
+    data: ListingCreate
+
+class ApiResponseListings(ApiResponse):
+    data: List[ListingList]

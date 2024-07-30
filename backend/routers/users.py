@@ -78,7 +78,7 @@ async def read_root(request: Request, response: Response):
 
 @router.get("/", response_model=ApiResponseUsers)
 async def get_users():
-    users_list = users.get_users()
+    users_list = await users.get_users()
     return ApiResponseUsers(status_code=200, data=users_list, message="Users retrieved successfully")
 
 @router.get("/current-user", response_model=ApiResponseUser)

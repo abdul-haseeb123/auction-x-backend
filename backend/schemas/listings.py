@@ -1,7 +1,7 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, Field, BeforeValidator
 from enum import Enum
 from .images import Image
-from typing import Union
+from typing import Union, Optional, Annotated
 from datetime import datetime
 
 class Category(str, Enum):
@@ -22,32 +22,23 @@ class Category(str, Enum):
     class Config:
         use_enum_values = True
 
+class Bid(BaseModel):
+    user: str
+    amount: float
+    created_at: datetime
 
 class ListingBase(BaseModel):
     owner: str
     title: str
+    slug: str
     description: str
     active: bool = True
-    cover_image: Union[str, Image]
-    listing_images: list[Union[str, Image]] = []
-    category: Category
-    bids: list[str] = []
-    starting_bid: float
-    current_bid: float
-    current_winner: str
-    created_at: datetime
-    updated_at: datetime
-
-class ListingCreate(BaseModel):
-    title: str
-    description: str
-    starting_bid: float
-    category: str
     closing_date: datetime
-    cover_image: Union[Image, str] = None
-    images: list[Union[Image, str]] = []
-    bids: list[str] = []
-    winner: str = None
+    category: Category
+    bids: list[Bid] = []
+    starting_bid: float
+    current_bid: float = 0
+    winner: str | None = None
 
     @field_validator("title")
     def validate_title(cls, v:str):
@@ -70,3 +61,33 @@ class ListingCreate(BaseModel):
         if v < 0:
             raise ValueError("starting bid must be greater than 0")
         return v
+
+class ListingCreate(ListingBase):
+    id : Optional[Annotated[str, BeforeValidator(str)]] = Field(alias="_id", default=None)
+    cover_image: Union[Image, str] = None
+    images: list[Union[Image, str]] = []
+    created_at: datetime
+    updated_at: datetime
+
+class ListingUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[Category] = None
+    starting_bid: Optional[float] = None
+    closing_date: Optional[datetime] = None
+
+
+
+class ListingList(ListingBase):
+    id : Optional[Annotated[str, BeforeValidator(str)]] = Field(alias="_id", default=None)
+    cover_image: Union[Image, str] = None
+
+class ListingDetail(ListingBase):
+    id : Optional[Annotated[str, BeforeValidator(str)]] = Field(alias="_id", default=None)
+    cover_image: Union[Image, str] = None
+    images: list[Union[Image, str]] = []
+    created_at: datetime
+    updated_at: datetime
+
+
+    

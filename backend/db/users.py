@@ -6,7 +6,7 @@ from bson import ObjectId
 db = get_database()
 collection = db["users"]
 
-def get_users():
+async def get_users():
     user_list = collection.find()
     return list(user_list)
 
@@ -60,6 +60,9 @@ async def update_avatar(username: str, avatar: dict, new=False):
 
 async def update_cover_image(username: str, cover_image: dict, new=False):
     return collection.find_one_and_update({"username": username}, {"$set": {"cover_image": cover_image}}, return_document=ReturnDocument.AFTER if new else ReturnDocument.BEFORE)
+
+async def update_listing(username: str, listing_id: str, new=False):
+    return collection.find_one_and_update({"username": username}, {"$push": {"listings": listing_id}}, return_document=ReturnDocument.AFTER if new else ReturnDocument.BEFORE)
 
 async def delete_user(username: str):
     return collection.delete_one({"username": username})
