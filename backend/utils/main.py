@@ -1,5 +1,6 @@
-from passlib.context import CryptContext
+# from passlib.context import CryptContext
 import os
+import bcrypt
 import cloudinary
 import cloudinary.uploader
 from ..schemas.images import Image
@@ -10,15 +11,18 @@ cloudinary.config(
     api_secret=os.environ.get("CLOUDINARY_API_SECRET")
 )
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def verify_password(plain_password:str, hashed_password:str):
+    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+    # return pwd_context.verify(plain_password, hashed_password)
 
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def get_password_hash(password:str):
+    # return pwd_context.hash(password)
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode(), salt).decode()
 
 async def upload_image(file) -> Image:
     uploaded = cloudinary.uploader.upload(file, resource_type="image", folder="auction_x")
