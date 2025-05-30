@@ -16,20 +16,35 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
-
+    services:
+      mongodb:
+        image: mongo
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'" 
+          --health-interval 10s 
+          --health-timeout 5s 
+          --health-retries 5
     steps:
     - name: Install necessary dependencies for bcrypt
       run: |
         sudo apt-get install build-essential cargo
+        
     - uses: actions/checkout@v4
     - name: Set up Python 3.13
       uses: actions/setup-python@v3
       with:
         python-version: "3.13"
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Set MongoDB test URI environment variables
+      run: echo "MONGODB_URI=mongodb://localhost:27017/" >> $GITHUB_ENV
+
     - name: Test with pytest
       run: |
         pytest
