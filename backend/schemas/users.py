@@ -4,6 +4,7 @@ from typing import Annotated, Optional, Union
 
 from ..schemas.images import Image
 from ..db import users
+from pymongo.asynchronous.database import AsyncDatabase
 
 
 
@@ -64,7 +65,7 @@ class UserCreate(BaseModel):
         return v
         
 
-    async def save(self):
+    async def save(self, db:AsyncDatabase):
         user = {
             "full_name": self.full_name,
             "username": self.username,
@@ -75,7 +76,7 @@ class UserCreate(BaseModel):
             "email_verified": self.email_verified,
             "account_type": self.account_type
         }
-        user_id = await users.create_user(user)
+        user_id = await users.create_user(user, db)
         user["_id"] = user_id
         # print()
         return User(**user)
