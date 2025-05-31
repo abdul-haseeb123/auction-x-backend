@@ -16,6 +16,8 @@ import os
 from authlib.integrations.starlette_client import OAuth , OAuthError
 from starlette.config import Config
 from ..db import users
+from pydantic import ValidationError
+from cloudinary.exceptions import BadRequest
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/users/login")
 config = Config(".env")
@@ -120,20 +122,29 @@ async def register_user(request: Request, db: Annotated[AsyncDatabase, Depends(g
     if cover_image:
         try:
              if cover_image.headers.get("content-type").startswith("image"):
-                 uploaded_cover = await upload_image(cover_image.file)
+                try:
+                    uploaded_cover = await upload_image(cover_image.file)
+                except BadRequest:
+                    raise HTTPException(400, detail="Cover image must be an image file")
              else:
                  raise HTTPException(400, detail="Cover image must be an image file")
-        except AttributeError or KeyError:
+        except AttributeError or KeyError or BadRequest:
             raise HTTPException(400, detail="Cover image must be an image file")
     if avatar:
         try:
             if avatar.headers.get("content-type").startswith("image"):
-                uploaded_avatar = await upload_image(avatar.file)
+                try:
+                    uploaded_avatar = await upload_image(avatar.file)
+                except BadRequest:
+                    raise HTTPException(400, detail="Avatar must be an image file")
             else:
                 raise HTTPException(400, detail="Avatar must be an image file")
-        except AttributeError or KeyError:
+        except AttributeError or KeyError or BadRequest:
             raise HTTPException(400, detail="Avatar must be an image file")
-    user = UserCreate(full_name=full_name, username=username, email=email, password=password, avatar=uploaded_avatar if avatar else None, cover_image=uploaded_cover if cover_image else None)
+    try:
+        user = UserCreate(full_name=full_name, username=username, email=email, password=password, avatar=uploaded_avatar if avatar else None, cover_image=uploaded_cover if cover_image else None)
+    except ValidationError as e:
+        raise HTTPException(400, detail=str(e))
     try:
         user = await user.save(db)
     except DuplicateKeyError:
@@ -198,7 +209,7 @@ async def logout(current_user: Annotated[User, Depends(get_current_user)], respo
     await users.update_refresh_token(current_user.username, None, db=db)
     response.delete_cookie("access_token", secure=True, httponly=True)
     response.delete_cookie("refresh_token", secure=True, httponly=True)
-    return ApiResponse(message="User loggged out successfully", status_code=200)
+    return ApiResponse(message="User logged out successfully", status_code=200)
 
 @router.post("/refresh-token", response_model=ApiResponseRefresh)
 async def refresh_token(request: Request, response: Response, db: Annotated[AsyncDatabase, Depends(get_db)]):
