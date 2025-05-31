@@ -1,10 +1,27 @@
 from ..utils.db import get_database
 from ..utils.main import get_password_hash
 from pymongo.asynchronous.database import AsyncDatabase
-from pymongo import ReturnDocument
+from pymongo import ReturnDocument, ASCENDING
+from pymongo.errors import OperationFailure
 from bson import ObjectId
 
 # db = get_database()
+
+async def ensure_username_email_index(db: AsyncDatabase):
+    existing_indexes = [index["name"] async for index in await db.users.list_indexes()]
+    if "username_1" and "email_1" not in existing_indexes:
+        try:
+            await db.users.create_index([("username", ASCENDING)], name="username_1", unique=True)
+            print("✅ Created index on 'username'")
+        except OperationFailure as e:
+            print(f"⚠️ Index creation failed: {e}")
+    if "email_1" not in existing_indexes:
+        try:
+            await db.users.create_index([("email", ASCENDING)], name="email_1", unique=True)
+            print("✅ Created index on 'email'")
+        except OperationFailure as e:
+            print(f"⚠️ Index creation failed: {e}")
+    
 
 async def get_users(db: AsyncDatabase):
     user_list = []
