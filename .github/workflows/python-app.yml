@@ -52,5 +52,7 @@ jobs:
         CLOUDINARY_NAME: ${{secrets.CLOUDINARY_NAME}}
         CLOUDINARY_API_KEY: ${{secrets.CLOUDINARY_API_KEY}}
         CLOUDINARY_API_SECRET: ${{secrets.CLOUDINARY_API_SECRET}}
+        ACCESS_TOKEN_SECRET: $(openssl rand -hex 32)
+        REFRESH_TOKEN_SECRET: $(openssl rand -hex 32)
         ACCESS_TOKEN_EXPIRY: 1
         REFRESH_TOKEN_EXPIRY: 7
