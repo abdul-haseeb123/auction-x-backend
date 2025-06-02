@@ -9,6 +9,7 @@ dependencies = [
     "bcrypt>=4.3.0",
     "cloudinary>=1.44.0",
     "fastapi[standard]>=0.115.12",
+    "freezegun>=1.5.2",
     "itsdangerous>=2.2.0",
     "pyjwt>=2.10.1",
     "pymongo>=4.13.0",
