@@ -238,7 +238,7 @@ async def refresh_token(request: Request, response: Response, db: Annotated[Asyn
     user = await users.get_user_by_id(decoded["id"], db)
     if not user:
         raise HTTPException(401, "User not found")
-    _, access_token, refresh_token = await generate_access_refresh_token(TokenData(**user))
+    _, access_token, refresh_token = await generate_access_refresh_token(TokenData(**user), db)
     response.set_cookie("access_token", access_token, secure=True, httponly=True)
     response.set_cookie("refresh_token", refresh_token, secure=True, httponly=True)
     token = RefreshToken(access_token=access_token, refresh_token=refresh_token)
@@ -270,7 +270,7 @@ async def update_password(current_user: Annotated[User, Depends(get_current_user
     return {"status_code": 200, "message": "Password updated successfully", "data": None, "success": True}
 
 @router.put("/update-profile", response_model=ApiResponseUser)
-async def update_profile(current_user: Annotated[User, Depends(get_current_user)], full_name: Annotated[str, Body(examples={"default":{"value":"John Doe"}})], db: Annotated[AsyncDatabase, Depends(get_db)]):
+async def update_profile(current_user: Annotated[User, Depends(get_current_user)], full_name: Annotated[str, Body(examples={"default":{"value":"John Doe"}}, min_length=3, max_length=80)], db: Annotated[AsyncDatabase, Depends(get_db)]):
     updated_user = await users.update_full_name(current_user.username, full_name, db, new=True)
     return ApiResponseUser(status_code=200, message="Profile updated successfully", data=User(**updated_user))
 
@@ -278,7 +278,10 @@ async def update_profile(current_user: Annotated[User, Depends(get_current_user)
 async def update_avatar(current_user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncDatabase, Depends(get_db)], avatar: UploadFile = File()):
     try:
         if avatar.headers.get("content-type").startswith("image"):
-            uploaded_avatar = await upload_image(avatar.file)
+            try:
+                uploaded_avatar = await upload_image(avatar.file)
+            except BadRequest:
+                raise HTTPException(400, detail="Avatar must be an image file")
         else:
             raise HTTPException(400, detail="Avatar must be an image file")
     except AttributeError or KeyError:
@@ -295,7 +298,10 @@ async def update_avatar(current_user: Annotated[User, Depends(get_current_user)]
 async def update_cover_image(current_user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncDatabase, Depends(get_db)], cover_image: UploadFile = File()):
     try:
         if cover_image.headers.get("content-type").startswith("image"):
-            uploaded_avatar = await upload_image(cover_image.file)
+            try:
+                uploaded_avatar = await upload_image(cover_image.file)
+            except BadRequest:
+                raise HTTPException(400, detail="Cover image must be an image file")
         else:
             raise HTTPException(400, detail="Cover image must be an image file")
     except AttributeError or KeyError:
@@ -306,7 +312,7 @@ async def update_cover_image(current_user: Annotated[User, Depends(get_current_u
         except Exception as e:
             raise HTTPException(400, detail=str(e))
     updated_user = await users.update_cover_image(current_user.username, uploaded_avatar.model_dump(), db, new=True)
-    return ApiResponseUser(status_code=200, message="Cover Image updated successfully", data=User(**updated_user))
+    return ApiResponseUser(status_code=200, message="Cover image updated successfully", data=User(**updated_user))
 
 @router.delete("/delete-account", response_model=ApiResponse)
 async def delete_account(current_user: Annotated[User, Depends(get_current_user)], response: Response, db: Annotated[AsyncDatabase, Depends(get_db)]):
