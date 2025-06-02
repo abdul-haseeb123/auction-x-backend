@@ -11,8 +11,8 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 class User(BaseModel):
     id : Optional[Annotated[str, BeforeValidator(str)]] = Field(alias="_id", default=None)
-    full_name: str = Field(examples=["John Doe"])
-    username: str = Field(examples=["john_doe"])
+    full_name: str = Field(examples=["John Doe"], min_length=3, max_length=80)
+    username: str = Field(examples=["john_doe"], min_length=3, max_length=50)
     email: EmailStr
     email_verified: Optional[bool] = False
     avatar: Optional[Union[Image, str]] = None
