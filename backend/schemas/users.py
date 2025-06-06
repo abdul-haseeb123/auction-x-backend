@@ -7,10 +7,10 @@ from ..db import users
 from pymongo.asynchronous.database import AsyncDatabase
 
 
-
-
 class User(BaseModel):
-    id : Optional[Annotated[str, BeforeValidator(str)]] = Field(alias="_id", default=None)
+    id: Optional[Annotated[str, BeforeValidator(str)]] = Field(
+        alias="_id", default=None
+    )
     full_name: str = Field(examples=["John Doe"], min_length=3, max_length=80)
     username: str = Field(examples=["john_doe"], min_length=3, max_length=50)
     email: EmailStr
@@ -18,15 +18,16 @@ class User(BaseModel):
     avatar: Optional[Union[Image, str]] = None
     cover_image: Optional[Union[Image, str]] = None
     account_type: Optional[str] = Field(default="EMAIL")
-    
+
 
 class GoogleToken(BaseModel):
     access_token: str
     refresh_token: str
     expires_at: datetime
 
+
 class GoogleUser(BaseModel):
-    full_name : str
+    full_name: str
     username: str
     email: EmailStr
     email_verified: bool
@@ -34,6 +35,7 @@ class GoogleUser(BaseModel):
     cover_image: Optional[Union[Image, str]] = None
     account_type: Optional[str] = Field(default="GOOGLE")
     token: GoogleToken
+
 
 class UserCreate(BaseModel):
     full_name: str = Field(examples=["John Doe"], min_length=3, max_length=80)
@@ -45,27 +47,27 @@ class UserCreate(BaseModel):
     cover_image: Optional[Union[Image, str]] = None
     account_type: Optional[str] = Field(default="EMAIL")
 
-    @field_validator("username")    
-    def validate_username(cls, v:str):
+    @field_validator("username")
+    def validate_username(cls, v: str):
         if " " in v:
             raise ValueError("username must not contain space")
         return v
+
     @field_validator("full_name")
-    def validate_full_name(cls, v:str):
+    def validate_full_name(cls, v: str):
         if len(v) == 0:
             raise ValueError("full name must not be empty")
         return v.title()
 
     @field_validator("password")
-    def validate_password(cls,v:str):
+    def validate_password(cls, v: str):
         if v is None:
             raise ValueError("password cannot be empty")
-        if len(v) == None:
+        if len(v) is None:
             raise ValueError("password cannot be empty")
         return v
-        
 
-    async def save(self, db:AsyncDatabase):
+    async def save(self, db: AsyncDatabase):
         user = {
             "full_name": self.full_name,
             "username": self.username,
@@ -74,11 +76,9 @@ class UserCreate(BaseModel):
             "avatar": self.avatar.model_dump() if self.avatar else None,
             "cover_image": self.cover_image.model_dump() if self.cover_image else None,
             "email_verified": self.email_verified,
-            "account_type": self.account_type
+            "account_type": self.account_type,
         }
         user_id = await users.create_user(user, db)
         user["_id"] = user_id
         # print()
         return User(**user)
-
-

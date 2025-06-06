@@ -7,8 +7,9 @@ from .utils.db import get_database
 from .db.listings import ensure_slug_index
 from .db.users import ensure_username_email_index
 
+
 @asynccontextmanager
-async def lifespan(app:FastAPI):
+async def lifespan(app: FastAPI):
     db = get_database()
     await ensure_slug_index(db)
     await ensure_username_email_index(db)
@@ -24,11 +25,15 @@ origins = [
     "http://localhost:3000",
 ]
 
+
 def build_app(lifespan) -> FastAPI:
     app = FastAPI(
-    title= "AuctionX API",
-    root_path="/api/v1", 
-    servers=[{"url": "http://localhost:8000/api/v1", "description": "Localhost server"}], lifespan=lifespan
+        title="AuctionX API",
+        root_path="/api/v1",
+        servers=[
+            {"url": "http://localhost:8000/api/v1", "description": "Localhost server"}
+        ],
+        lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -50,6 +55,7 @@ app = build_app(lifespan)
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
+
 
 # import logging
 # import sys

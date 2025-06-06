@@ -18,3 +18,9 @@ dependencies = [
     "python-slugify>=8.0.4",
     "pytz>=2025.2",
 ]
+
+[dependency-groups]
+dev = [
+    "pylint>=3.3.7",
+    "ruff>=0.11.12",
+]

@@ -1,10 +1,33 @@
-version: '3.4'
-
 services:
-  fastapiimage:
-    image: fastapiimage
-    build:
-      context: .
-      dockerfile: ./Dockerfile
+  fastapi-backend:
+    image: fastapi-backend
+    build: .
+    volumes:
+      - ./:/usr/src/app
+    env_file:
+      - ./.env
+    environment:
+      - MONGODB_URI=mongodb://auctionx-mongodb:27017
+    depends_on:
+      - auctionx-mongodb
     ports:
       - 8000:8000
+
+    networks:
+      - auctionx-network
+
+  auctionx-mongodb:
+    image: mongo
+    container_name: auctionx-mongodb
+    volumes:
+      - data:/data/db 
+    ports:
+      - 27017:27017
+    networks:
+      - auctionx-network
+
+volumes:
+  data:
+
+networks:
+  auctionx-network:
