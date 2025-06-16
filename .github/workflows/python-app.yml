@@ -5,7 +5,7 @@ name: Python FastAPI application
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "migrate-to-beanie" ]
   pull_request:
     branches: [ "main" ]
 
