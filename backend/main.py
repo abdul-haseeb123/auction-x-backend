@@ -1,20 +1,24 @@
+from contextlib import asynccontextmanager
+
+from beanie import init_beanie
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import users, listings
+from motor.motor_asyncio import AsyncIOMotorClient
 from starlette.middleware.sessions import SessionMiddleware
-from contextlib import asynccontextmanager
-from .utils.db import get_database
-from .db.listings import ensure_slug_index
-from .db.users import ensure_username_email_index
+
+from .config import settings
+from .routers import users
+from .schemas.users import GoogleUser, LocalUser, User
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db = get_database()
-    await ensure_slug_index(db)
-    await ensure_username_email_index(db)
+    cli = AsyncIOMotorClient(settings.mongodb_uri)
+    await init_beanie(
+        database=cli[settings.db_name], document_models=[User, LocalUser, GoogleUser]
+    )
     yield
-    await db.client.close()
+    cli.close()
 
 
 origins = [
@@ -44,7 +48,7 @@ def build_app(lifespan) -> FastAPI:
     )
     app.add_middleware(SessionMiddleware, secret_key="my-very-long-secret")
     app.include_router(users.router)
-    app.include_router(listings.router)
+    # app.include_router(listings.router)
 
     return app
 
@@ -55,10 +59,3 @@ app = build_app(lifespan)
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
-
-
-# import logging
-# import sys
-# log = logging.getLogger('authlib')
-# log.addHandler(logging.StreamHandler(sys.stdout))
-# log.setLevel(logging.DEBUG)

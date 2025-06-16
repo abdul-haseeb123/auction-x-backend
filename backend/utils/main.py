@@ -1,17 +1,15 @@
-# from passlib.context import CryptContext
-import os
 import bcrypt
 import cloudinary
 import cloudinary.uploader
+
+from ..config import settings
 from ..schemas.images import Image
 
 cloudinary.config(
-    cloud_name=os.environ.get("CLOUDINARY_NAME"),
-    api_key=os.environ.get("CLOUDINARY_API_KEY"),
-    api_secret=os.environ.get("CLOUDINARY_API_SECRET"),
+    cloud_name=settings.cloudinary_name,
+    api_key=settings.cloudinary_api_key,
+    api_secret=settings.cloudinary_api_secret,
 )
-
-# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str):

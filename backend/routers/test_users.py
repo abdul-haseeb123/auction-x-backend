@@ -1,176 +1,117 @@
-import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from ..dependencies.db import get_db
-from pymongo import AsyncMongoClient
-from pymongo.asynchronous.database import AsyncDatabase
-from ..main import app
-import os
-from ..db.listings import ensure_slug_index
-from ..db.users import ensure_username_email_index
-from ..utils.main import delete_image
-from freezegun import freeze_time
 from datetime import datetime, timedelta, timezone
 
+import pytest
+from freezegun import freeze_time
+from httpx import AsyncClient
 
-@pytest_asyncio.fixture(name="test_db")
-async def get_test_db():
-    client = AsyncMongoClient(
-        os.environ.get("MONGODB_URI", "mongodb://localhost:27017/")
+from ..schemas.users import LocalUser
+from ..utils.main import delete_image
+
+
+def get_test_user(idx):
+    return LocalUser(
+        full_name=f"Test User {idx}",
+        username=f"testuser{idx}",
+        email=f"testuser{idx}@example.com",
+        password=f"testpassword{idx}",
     )
-    db = client["test-commerce"]
-    await ensure_slug_index(db)
-    await ensure_username_email_index(db)
-    yield db
-    await client.close()
 
 
-@pytest_asyncio.fixture(name="test_client")
-async def get_test_client(test_db):
-    def get_test_db():
-        return test_db
-
-    app.dependency_overrides[get_db] = get_test_db
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://127.0.0.1:8000/api/v1"
-    ) as client:
-        yield client
+def get_test_data():
+    return {
+        "full_name": "Test User",
+        "username": "testuser",
+        "email": "testuser@example.com",
+        "password": "testpassword",
+    }
 
 
 @pytest.mark.asyncio
-async def test_get_users(test_db: AsyncDatabase, test_client):
+async def test_get_users(test_client):
     # Insert test data into the test database
-    users_list = [
-        {
-            "username": "alice",
-            "full_name": "Alice",
-            "avatar": None,
-            "cover_image": None,
-            "email": "alice@example.com",
-            "email_verified": False,
-            "password": "hashedpassword1",
-            "account_type": "EMAIL",
-        },
-        {
-            "username": "bob",
-            "full_name": "Bob",
-            "avatar": None,
-            "cover_image": None,
-            "email": "bob@example.com",
-            "email_verified": False,
-            "password": "hashedpassword2",
-            "account_type": "EMAIL",
-        },
-        {
-            "username": "charlie",
-            "full_name": "Charlie",
-            "avatar": None,
-            "cover_image": None,
-            "email": "charlie@example.com",
-            "email_verified": False,
-            "password": "hashedpassword2",
-            "account_type": "EMAIL",
-        },
-    ]
-    await test_db.users.insert_many(users_list)
-
+    users_list = [get_test_user(i) for i in range(10)]
+    await LocalUser.insert_many(users_list)
     response = await test_client.get("/users/")
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert isinstance(data["data"], list)
-    assert len(data["data"]) == 3
+    assert len(data["data"]) == 10
     assert isinstance(response.json(), dict)
 
-    await test_db.users.delete_many({})  # Clean up test data
+    await LocalUser.delete_all()  # Clean up test data
 
 
 @pytest.mark.asyncio
 async def test_register_user(test_client: AsyncClient):
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 1",
-            "username": "testuser1",
-            "email": "testuser1@example.com",
-            "password": "testpassword1",
-        },
-    )
+    response = await test_client.post("/users/", data=get_test_data())
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User registered successfully"
-    assert data["data"]["username"] == "testuser1"
+    assert data["data"]["username"] == "testuser"
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
-async def test_register_user_with_existing_username(
-    test_client: AsyncClient, test_db: AsyncDatabase
-):
-    # First, register a user with the username "existinguser
+async def test_register_user_with_existing_username(test_client: AsyncClient):
+    response = await test_client.post("/users/", data=get_test_data())
+    assert response.status_code == 200
+    data = response.json()
+    assert data["message"] == "User registered successfully"
+    assert "username" in data["data"] and data["data"]["username"] == "testuser"
+
     response = await test_client.post(
         "/users/",
         data={
-            "full_name": "Test User 2",
-            "username": "testuser1",
-            "email": "testuser2@example.com",
-            "password": "testpassword2",
+            "full_name": "Test User1",
+            "username": "testuser",
+            "email": "testuser1@example.com",
+            "password": "testpassword1",
         },
     )
+
     assert response.status_code == 400
     data = response.json()
     assert data["detail"] == "Username or email already exists"
 
-    await test_db.users.delete_one({"username": "testuser1"})  # Clean up test data
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
-async def test_register_user_with_existing_email(
-    test_client: AsyncClient, test_db: AsyncDatabase
-):
+async def test_register_user_with_existing_email(test_client: AsyncClient):
     # First, register a user with the email "
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 3",
-            "username": "testuser3",
-            "email": "testuser3@example.com",
-            "password": "testpassword3",
-        },
-    )
+    response = await test_client.post("/users/", data=get_test_data())
     assert response.status_code == 200
     data = response.json()
     assert data["message"] == "User registered successfully"
-    assert "username" in data["data"] and data["data"]["username"] == "testuser3"
+    assert "username" in data["data"] and data["data"]["username"] == "testuser"
 
     # Now, try to register another user with the same email
     response = await test_client.post(
         "/users/",
         data={
-            "full_name": "Test User 4",
-            "username": "testuser4",
-            "email": "testuser3@example.com",
-            "password": "testpassword4",
+            "full_name": "Test User1",
+            "username": "testuser1",
+            "email": "testuser@example.com",
+            "password": "testpassword1",
         },
     )
     assert response.status_code == 400
     data = response.json()
     assert data["detail"] == "Username or email already exists"
 
-    await test_db.users.delete_one({"username": "testuser3"})  # Clean up test data
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
 async def test_register_user_with_invalid_email(test_client: AsyncClient):
+    data = get_test_data()
+    data["email"] = "invalid-email"
     response = await test_client.post(
         "/users/",
-        data={
-            "full_name": "Test User 5",
-            "username": "testuser5",
-            "email": "invalid-email",
-            "password": "testpassword5",
-        },
+        data=data,
     )
     assert response.status_code == 400
 
@@ -180,8 +121,8 @@ async def test_register_user_with_missing_fields(test_client: AsyncClient):
     response = await test_client.post(
         "/users/",
         data={
-            "full_name": "Test User 6",
-            "username": "testuser6",
+            "full_name": "Test User",
+            "username": "testuser",
             # Missing email and password
         },
     )
@@ -192,12 +133,7 @@ async def test_register_user_with_missing_fields(test_client: AsyncClient):
 async def test_register_user_with_invalid_avatar(test_client: AsyncClient):
     response = await test_client.post(
         "/users/",
-        data={
-            "full_name": "Test User 7",
-            "username": "testuser7",
-            "email": "testuser7@example.com",
-            "password": "testpassword7",
-        },
+        data=get_test_data(),
         files={
             "avatar": ("test.txt", open("assets/test/test.txt", "rb"), "text/plain")
         },
@@ -209,12 +145,7 @@ async def test_register_user_with_invalid_avatar(test_client: AsyncClient):
 
     response = await test_client.post(
         "/users/",
-        data={
-            "full_name": "Test User 7",
-            "username": "testuser7",
-            "email": "testuser7@example.com",
-            "password": "testpassword7",
-        },
+        data=get_test_data(),
         files={
             "avatar": ("test.txt", open("assets/test/test.txt", "rb"), "image/avif")
         },
@@ -225,12 +156,7 @@ async def test_register_user_with_invalid_avatar(test_client: AsyncClient):
 
     response = await test_client.post(
         "/users/",
-        data={
-            "full_name": "Test User 7",
-            "username": "testuser7",
-            "email": "testuser7@example.com",
-            "password": "testpassword7",
-        },
+        data=get_test_data(),
         files={
             "avatar": ("test.jpeg", open("assets/test/test.txt", "rb"), "image/avif")
         },
@@ -244,12 +170,7 @@ async def test_register_user_with_invalid_avatar(test_client: AsyncClient):
 async def test_register_user_with_invalid_cover_image(test_client: AsyncClient):
     response = await test_client.post(
         "/users/",
-        data={
-            "full_name": "Test User 8",
-            "username": "testuser8",
-            "email": "testuser8@example.com",
-            "password": "testpassword8",
-        },
+        data=get_test_data(),
         files={
             "cover_image": (
                 "test.txt",
@@ -265,12 +186,7 @@ async def test_register_user_with_invalid_cover_image(test_client: AsyncClient):
 
     response = await test_client.post(
         "/users/",
-        data={
-            "full_name": "Test User 8",
-            "username": "testuser8",
-            "email": "testuser8@example.com",
-            "password": "testpassword8",
-        },
+        data=get_test_data(),
         files={
             "cover_image": (
                 "test.txt",
@@ -285,12 +201,7 @@ async def test_register_user_with_invalid_cover_image(test_client: AsyncClient):
 
     response = await test_client.post(
         "/users/",
-        data={
-            "full_name": "Test User 8",
-            "username": "testuser8",
-            "email": "testuser8@example.com",
-            "password": "testpassword8",
-        },
+        data=get_test_data(),
         files={
             "cover_image": (
                 "test.jpeg",
@@ -305,17 +216,10 @@ async def test_register_user_with_invalid_cover_image(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_create_user_with_avatar_and_cover_image(
-    test_client: AsyncClient, test_db: AsyncDatabase
-):
+async def test_create_user_with_avatar_and_cover_image(test_client: AsyncClient):
     response = await test_client.post(
         "/users/",
-        data={
-            "full_name": "Test User 9",
-            "username": "testuser9",
-            "email": "testuser9@example.com",
-            "password": "testpassword9",
-        },
+        data=get_test_data(),
         files={
             "avatar": (
                 "avatar.jpg",
@@ -335,7 +239,7 @@ async def test_create_user_with_avatar_and_cover_image(
     assert data is not None
     assert "data" in data
     assert data["message"] == "User registered successfully"
-    assert data["data"]["username"] == "testuser9"
+    assert data["data"]["username"] == "testuser"
     assert data["data"]["avatar"] is not None
     assert data["data"]["cover_image"] is not None
     assert data["data"]["avatar"]["url"] is not None
@@ -352,31 +256,23 @@ async def test_create_user_with_avatar_and_cover_image(
     await delete_image(avatar["public_id"])
     await delete_image(cover_image["public_id"])
 
-    await test_db.users.delete_one({"username": "testuser9"})  # Clean up test data
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
-async def test_login_logout_user(test_client: AsyncClient, test_db: AsyncDatabase):
+async def test_login_logout_user(test_client: AsyncClient):
     # First, register a user
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 10",
-            "username": "testuser10",
-            "email": "testuser10@example.com",
-            "password": "testpassword10",
-        },
-    )
+    response = await test_client.post("/users/", data=get_test_data())
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User registered successfully"
-    assert data["data"]["username"] == "testuser10"
+    assert data["data"]["username"] == "testuser"
 
     # Now, log in the user
     response = await test_client.post(
-        "/users/login", data={"username": "testuser10", "password": "testpassword10"}
+        "/users/login", data={"username": "testuser", "password": "testpassword"}
     )
 
     assert response.status_code == 200
@@ -384,7 +280,7 @@ async def test_login_logout_user(test_client: AsyncClient, test_db: AsyncDatabas
     assert data is not None
     assert "data" in data
     assert data["message"] == "User logged in successfully"
-    assert data["data"]["user"]["username"] == "testuser10"
+    assert data["data"]["user"]["username"] == "testuser"
 
     # Check if the access_token, refresh_token cookie is set
     assert "access_token" in response.cookies
@@ -403,13 +299,11 @@ async def test_login_logout_user(test_client: AsyncClient, test_db: AsyncDatabas
     assert "access_token" not in response.cookies
     assert "refresh_token" not in response.cookies
     # Clean up the test user
-    await test_db.users.delete_one({"username": "testuser10"})
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
-async def test_login_user_with_invalid_credentials(
-    test_client: AsyncClient, test_db: AsyncDatabase
-):
+async def test_login_user_with_invalid_credentials(test_client: AsyncClient):
     response = await test_client.post(
         "/users/login",
         data={"username": "nonexistentuser", "password": "wrongpassword"},
@@ -420,18 +314,10 @@ async def test_login_user_with_invalid_credentials(
     assert "detail" in data
     assert data["detail"] == "Incorrect username or password"
 
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 11",
-            "username": "testuser11",
-            "email": "testuser11@example.com",
-            "password": "testpassword11",
-        },
-    )
+    response = await test_client.post("/users/", data=get_test_data())
 
     response = await test_client.post(
-        "/users/login", data={"username": "testuser11", "password": "wrongpassword"}
+        "/users/login", data={"username": "testuser", "password": "wrongpassword"}
     )
     assert response.status_code == 401
     data = response.json()
@@ -440,7 +326,7 @@ async def test_login_user_with_invalid_credentials(
     assert data["detail"] == "Incorrect username or password"
 
     response = await test_client.post(
-        "/users/login", data={"username": "testuser10", "password": "testpassword11"}
+        "/users/login", data={"username": "wrongusername", "password": "testpassword"}
     )
     assert response.status_code == 401
     data = response.json()
@@ -448,39 +334,31 @@ async def test_login_user_with_invalid_credentials(
     assert "detail" in data
     assert data["detail"] == "Incorrect username or password"
     # Clean up the test user
-    await test_db.users.delete_one({"username": "testuser11"})
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
-async def test_get_current_user(test_client: AsyncClient, test_db: AsyncDatabase):
+async def test_get_current_user(test_client: AsyncClient):
     # First, register a user
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 12",
-            "username": "testuser12",
-            "email": "testuser12@example.com",
-            "password": "testpassword12",
-        },
-    )
+    response = await test_client.post("/users/", data=get_test_data())
 
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User registered successfully"
-    assert data["data"]["username"] == "testuser12"
+    assert data["data"]["username"] == "testuser"
 
     # Now, log in the user
     response = await test_client.post(
-        "/users/login", data={"username": "testuser12", "password": "testpassword12"}
+        "/users/login", data={"username": "testuser", "password": "testpassword"}
     )
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User logged in successfully"
-    assert data["data"]["user"]["username"] == "testuser12"
+    assert data["data"]["user"]["username"] == "testuser"
     # Check if the access_token, refresh_token cookie is set
     assert "access_token" in response.cookies
     assert "refresh_token" in response.cookies
@@ -495,9 +373,9 @@ async def test_get_current_user(test_client: AsyncClient, test_db: AsyncDatabase
     assert data is not None
     assert data["message"] == "User fetched successfully"
     assert "data" in data
-    assert data["data"]["username"] == "testuser12"
-    assert data["data"]["email"] == "testuser12@example.com"
-    assert data["data"]["full_name"] == "Test User 12"
+    assert data["data"]["username"] == "testuser"
+    assert data["data"]["email"] == "testuser@example.com"
+    assert data["data"]["full_name"] == "Test User"
     assert "password" not in data["data"]  # Password should not be returned
 
     response = await test_client.post("/users/logout")
@@ -510,7 +388,7 @@ async def test_get_current_user(test_client: AsyncClient, test_db: AsyncDatabase
     assert "refresh_token" not in response.cookies
 
     # Clean up the test user
-    await test_db.users.delete_one({"username": "testuser12"})
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
@@ -524,34 +402,26 @@ async def test_get_current_user_without_login(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_login_update_user(test_client: AsyncClient, test_db: AsyncDatabase):
+async def test_login_update_user(test_client: AsyncClient):
     # First, register a user
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 13",
-            "username": "testuser13",
-            "email": "testuser13@example.com",
-            "password": "testpassword13",
-        },
-    )
+    response = await test_client.post("/users/", data=get_test_data())
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User registered successfully"
-    assert data["data"]["username"] == "testuser13"
+    assert data["data"]["username"] == "testuser"
 
     # Now, log in the user
     response = await test_client.post(
-        "/users/login", data={"username": "testuser13", "password": "testpassword13"}
+        "/users/login", data={"username": "testuser", "password": "testpassword"}
     )
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User logged in successfully"
-    assert data["data"]["user"]["username"] == "testuser13"
+    assert data["data"]["user"]["username"] == "testuser"
     # Check if the access_token, refresh_token cookie is set
     assert "access_token" in response.cookies
     assert "refresh_token" in response.cookies
@@ -559,14 +429,14 @@ async def test_login_update_user(test_client: AsyncClient, test_db: AsyncDatabas
     test_client.cookies.set("access_token", response.cookies.get("access_token"))
     test_client.cookies.set("refresh_token", response.cookies.get("refresh_token"))
     # Now, update the user
-    response = await test_client.put("/users/update-profile", json="Updated User 13")
+    response = await test_client.put("/users/update-profile", json="Updated User")
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "Profile updated successfully"
-    assert data["data"]["username"] == "testuser13"
-    assert data["data"]["full_name"] == "Updated User 13"
+    assert data["data"]["username"] == "testuser"
+    assert data["data"]["full_name"] == "Updated User"
 
     # Now, update the user with an empty full_name
     response = await test_client.put("/users/update-profile", json="")
@@ -575,38 +445,30 @@ async def test_login_update_user(test_client: AsyncClient, test_db: AsyncDatabas
     assert data is not None
 
     await test_client.post("/users/logout")
-    await test_db.users.delete_one({"username": "testuser13"})  # Clean up test data
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
-async def test_login_update_avatar(test_client: AsyncClient, test_db: AsyncDatabase):
+async def test_login_update_avatar(test_client: AsyncClient):
     # First, register a user
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 14",
-            "username": "testuser14",
-            "email": "testuser14@example.com",
-            "password": "testpassword14",
-        },
-    )
+    response = await test_client.post("/users/", data=get_test_data())
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User registered successfully"
-    assert data["data"]["username"] == "testuser14"
+    assert data["data"]["username"] == "testuser"
 
     # Now, log in the user
     response = await test_client.post(
-        "/users/login", data={"username": "testuser14", "password": "testpassword14"}
+        "/users/login", data={"username": "testuser", "password": "testpassword"}
     )
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User logged in successfully"
-    assert data["data"]["user"]["username"] == "testuser14"
+    assert data["data"]["user"]["username"] == "testuser"
 
     # Check if the access_token, refresh_token cookie is set
     assert "access_token" in response.cookies
@@ -627,7 +489,7 @@ async def test_login_update_avatar(test_client: AsyncClient, test_db: AsyncDatab
     assert data is not None
     assert "data" in data
     assert data["message"] == "Avatar updated successfully"
-    assert data["data"]["username"] == "testuser14"
+    assert data["data"]["username"] == "testuser"
     assert data["data"]["avatar"] is not None
     assert data["data"]["avatar"]["url"] is not None
     assert data["data"]["avatar"]["secure_url"] is not None
@@ -650,7 +512,7 @@ async def test_login_update_avatar(test_client: AsyncClient, test_db: AsyncDatab
     assert data is not None
     assert "data" in data
     assert data["message"] == "Avatar updated successfully"
-    assert data["data"]["username"] == "testuser14"
+    assert data["data"]["username"] == "testuser"
     assert data["data"]["avatar"] is not None
     assert data["data"]["avatar"]["url"] is not None
     assert data["data"]["avatar"]["secure_url"] is not None
@@ -702,38 +564,30 @@ async def test_login_update_avatar(test_client: AsyncClient, test_db: AsyncDatab
     assert data["detail"] == "Avatar must be an image file"
     # Clean up the test user
     await delete_image(avatar_public_id)
-    await test_db.users.delete_one({"username": "testuser14"})
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
-async def test_login_update_cover(test_client: AsyncClient, test_db: AsyncDatabase):
+async def test_login_update_cover(test_client: AsyncClient):
     # First, register a user
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 15",
-            "username": "testuser15",
-            "email": "testuser15@example.com",
-            "password": "testpassword15",
-        },
-    )
+    response = await test_client.post("/users/", data=get_test_data())
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User registered successfully"
-    assert data["data"]["username"] == "testuser15"
+    assert data["data"]["username"] == "testuser"
 
     # Now, log in the user
     response = await test_client.post(
-        "/users/login", data={"username": "testuser15", "password": "testpassword15"}
+        "/users/login", data={"username": "testuser", "password": "testpassword"}
     )
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User logged in successfully"
-    assert data["data"]["user"]["username"] == "testuser15"
+    assert data["data"]["user"]["username"] == "testuser"
 
     # Check if the access_token, refresh_token cookie is set
     assert "access_token" in response.cookies
@@ -758,7 +612,7 @@ async def test_login_update_cover(test_client: AsyncClient, test_db: AsyncDataba
     assert data is not None
     assert "data" in data
     assert data["message"] == "Cover image updated successfully"
-    assert data["data"]["username"] == "testuser15"
+    assert data["data"]["username"] == "testuser"
     assert data["data"]["cover_image"] is not None
     assert data["data"]["cover_image"]["url"] is not None
     assert data["data"]["cover_image"]["secure_url"] is not None
@@ -781,7 +635,7 @@ async def test_login_update_cover(test_client: AsyncClient, test_db: AsyncDataba
     assert data is not None
     assert "data" in data
     assert data["message"] == "Cover image updated successfully"
-    assert data["data"]["username"] == "testuser15"
+    assert data["data"]["username"] == "testuser"
     assert data["data"]["cover_image"] is not None
     assert data["data"]["cover_image"]["url"] is not None
     assert data["data"]["cover_image"]["secure_url"] is not None
@@ -791,9 +645,9 @@ async def test_login_update_cover(test_client: AsyncClient, test_db: AsyncDataba
         "Cover image public ID should be different after update"
     )
     cover_image_public_id = data["data"]["cover_image"]["public_id"]
-    # Clean up the previous avatar image
+    # Clean up the previous cover image
 
-    # Now, update the avatar with an invalid file
+    # Now, update the cover with an invalid file
     response = await test_client.put(
         "/users/update-cover-image",
         files={
@@ -810,7 +664,7 @@ async def test_login_update_cover(test_client: AsyncClient, test_db: AsyncDataba
     assert "detail" in data
     assert data["detail"] == "Cover image must be an image file"
 
-    # Now, update the avatar with an invalid file type
+    # Now, update the cover with an invalid file type
     response = await test_client.put(
         "/users/update-cover-image",
         files={
@@ -827,7 +681,7 @@ async def test_login_update_cover(test_client: AsyncClient, test_db: AsyncDataba
     assert "detail" in data
     assert data["detail"] == "Cover image must be an image file"
 
-    # Now, update the avatar with an invalid file type
+    # Now, update the cover with an invalid file type
     response = await test_client.put(
         "/users/update-cover-image",
         files={
@@ -845,37 +699,29 @@ async def test_login_update_cover(test_client: AsyncClient, test_db: AsyncDataba
     assert data["detail"] == "Cover image must be an image file"
     # Clean up the test user
     await delete_image(cover_image_public_id)
-    await test_db.users.delete_one({"username": "testuser15"})
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
-async def test_login_access_token(test_client: AsyncClient, test_db: AsyncDatabase):
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 16",
-            "username": "testuser16",
-            "email": "testuser16@example.com",
-            "password": "testpassword16",
-        },
-    )
+async def test_login_access_token(test_client: AsyncClient):
+    response = await test_client.post("/users/", data=get_test_data())
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User registered successfully"
-    assert data["data"]["username"] == "testuser16"
+    assert data["data"]["username"] == "testuser"
 
     # Now, log in the user
     response = await test_client.post(
-        "/users/login", data={"username": "testuser16", "password": "testpassword16"}
+        "/users/login", data={"username": "testuser", "password": "testpassword"}
     )
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User logged in successfully"
-    assert data["data"]["user"]["username"] == "testuser16"
+    assert data["data"]["user"]["username"] == "testuser"
     # Check if the access_token, refresh_token cookie is set
     assert "access_token" in response.cookies
     assert "refresh_token" in response.cookies
@@ -890,7 +736,7 @@ async def test_login_access_token(test_client: AsyncClient, test_db: AsyncDataba
     assert data is not None
     assert data["message"] == "User fetched successfully"
     assert "data" in data
-    assert data["data"]["username"] == "testuser16"
+    assert data["data"]["username"] == "testuser"
 
     # Now, check the current user after 23 hours
     with freeze_time(datetime.now(timezone.utc) + timedelta(hours=23)):
@@ -900,7 +746,7 @@ async def test_login_access_token(test_client: AsyncClient, test_db: AsyncDataba
         assert data is not None
         assert data["message"] == "User fetched successfully"
         assert "data" in data
-        assert data["data"]["username"] == "testuser16"
+        assert data["data"]["username"] == "testuser"
 
     # Now, check the current user after 25 hours
     with freeze_time(datetime.now(timezone.utc) + timedelta(hours=25)):
@@ -913,37 +759,29 @@ async def test_login_access_token(test_client: AsyncClient, test_db: AsyncDataba
 
     test_client.cookies.clear()  # Clear cookies to simulate token expiration
     # Clean up the test user
-    await test_db.users.delete_one({"username": "testuser16"})
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()
 
 
 @pytest.mark.asyncio
-async def test_login_refresh_token(test_client: AsyncClient, test_db: AsyncDatabase):
-    response = await test_client.post(
-        "/users/",
-        data={
-            "full_name": "Test User 17",
-            "username": "testuser17",
-            "email": "testuser17@example.com",
-            "password": "testpassword17",
-        },
-    )
+async def test_login_refresh_token(test_client: AsyncClient):
+    response = await test_client.post("/users/", data=get_test_data())
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User registered successfully"
-    assert data["data"]["username"] == "testuser17"
+    assert data["data"]["username"] == "testuser"
 
     # Now, log in the user
     response = await test_client.post(
-        "/users/login", data={"username": "testuser17", "password": "testpassword17"}
+        "/users/login", data={"username": "testuser", "password": "testpassword"}
     )
     assert response.status_code == 200
     data = response.json()
     assert data is not None
     assert "data" in data
     assert data["message"] == "User logged in successfully"
-    assert data["data"]["user"]["username"] == "testuser17"
+    assert data["data"]["user"]["username"] == "testuser"
 
     # Check if the access_token, refresh_token cookie is set
     assert "access_token" in response.cookies
@@ -982,8 +820,8 @@ async def test_login_refresh_token(test_client: AsyncClient, test_db: AsyncDatab
         assert data is not None
         assert data["message"] == "User fetched successfully"
         assert "data" in data
-        assert data["data"]["username"] == "testuser17"
+        assert data["data"]["username"] == "testuser"
     # Clean up the client cookies
     test_client.cookies.clear()
     # Clean up the test user
-    await test_db.users.delete_one({"username": "testuser17"})
+    await LocalUser.find_one(LocalUser.username == "testuser").delete()

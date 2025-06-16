@@ -1,18 +1,20 @@
-from pydantic import BaseModel, Field, BeforeValidator
-from typing import List, Annotated
-from .users import User
+from typing import List, Union
+
+from pydantic import BaseModel, Field
+
 from .listings import ListingCreate, ListingList
+from .users import GoogleUser, LocalUser
 
 
 class TokenData(BaseModel):
-    id: Annotated[str, BeforeValidator(str)] = Field(alias="_id")
+    id: str
     username: str
     email: str
     full_name: str
 
 
 class Token(BaseModel):
-    user: User
+    user: Union[LocalUser, GoogleUser]
     access_token: str
     refresh_token: str
 
@@ -29,11 +31,11 @@ class ApiResponse(BaseModel):
 
 
 class ApiResponseUser(ApiResponse):
-    data: User
+    data: Union[LocalUser, GoogleUser]
 
 
 class ApiResponseUsers(ApiResponse):
-    data: List[User]
+    data: List[Union[LocalUser, GoogleUser]]
 
 
 class ApiResponseToken(ApiResponse):

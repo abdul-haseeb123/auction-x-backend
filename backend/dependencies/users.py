@@ -1,17 +1,15 @@
-import jwt
-import os
-from jwt.exceptions import InvalidTokenError
-from fastapi import Request, HTTPException, Depends
-from ..schemas.users import User
-from ..db import users
 from datetime import datetime
-from pymongo.asynchronous.database import AsyncDatabase
-from .db import get_db
+from typing import Union
+
+import jwt
+from fastapi import HTTPException, Request
+from jwt.exceptions import InvalidTokenError
+
+from ..config import settings
+from ..schemas.users import GoogleUser, LocalUser
 
 
-async def get_current_user(
-    request: Request, db: AsyncDatabase = Depends(get_db)
-) -> User:
+async def get_current_user(request: Request) -> Union[LocalUser, GoogleUser]:
     credentials_exception = HTTPException(
         status_code=401,
         detail="Could not validate credentials",
@@ -26,23 +24,21 @@ async def get_current_user(
         token = request.headers.get("Authorization").split(" ")[1]
     if request.cookies.get("access_token") is not None:
         token = request.cookies.get("access_token")
-    google_user = await users.get_google_user_by_access_token(token, db)
+    google_user = await GoogleUser.find_one(GoogleUser.token.access_token == token)
     if google_user:
         print("google user found")
         if google_user["token"]["expires_at"] < datetime.now():
             raise credentials_exception
-        return User(**google_user)
+        return google_user
 
     try:
-        payload = jwt.decode(
-            token, os.environ.get("ACCESS_TOKEN_SECRET"), algorithms=["HS256"]
-        )
+        payload = jwt.decode(token, settings.access_token_secret, algorithms=["HS256"])
         username: str = payload.get("username")
         if username is None:
             raise credentials_exception
     except InvalidTokenError:
         raise credentials_exception
-    user = await users.get_user_by_username(username, db)
+    user = await LocalUser.find_one(LocalUser.username == username)
     if user is None:
         raise credentials_exception
-    return User(**user)
+    return user
