@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -12,8 +14,8 @@ class Settings(BaseSettings):
     refresh_token_secret: str
     refresh_token_expiry: int
 
-    google_client_id: str
-    google_client_secret: str
+    google_client_id: Optional[str]
+    google_client_secret: Optional[str]
 
     cloudinary_name: str
     cloudinary_api_key: str
